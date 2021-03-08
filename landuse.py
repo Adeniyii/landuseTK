@@ -3,11 +3,13 @@ import re
 import psycopg2
 import datetime
 from tkinter import *
-from tkinter import ttk, Tk
 from pathlib import Path
+from arcgis.gis import GIS
+from tkinter import ttk, Tk
 from dotenv import load_dotenv
 from tkinter import messagebox
 from tkinter import filedialog
+import arcgis.geocoding as geocoding
 
 # Load environment variables and set current user
 path = Path('.') / '.env'
@@ -23,8 +25,13 @@ current_user = None
 # )
 
 # Connect to elephantSQL database hosting
-conn = psycopg2.connect(
-    "postgres://rwnqktkh:rEINi490ai8VpCMpwbTXfE4EsSJn7VJ0@ziggy.db.elephantsql.com:5432/rwnqktkh")
+try:
+    conn = psycopg2.connect(
+        "postgres://rwnqktkh:rEINi490ai8VpCMpwbTXfE4EsSJn7VJ0@ziggy.db.elephantsql.com:5432/rwnqktkh")
+except psycopg2.OperationalError as e:
+    messagebox.showerror(
+        "Network Error", "Please ensure you have an internet connection.")
+    os.abort()
 
 # Create cursor -- to execute commands on database
 cur = conn.cursor()
@@ -393,13 +400,13 @@ def dashboard():
 
     addPostButton = Button(dashboardFrame, text="Database",
                            padx=100, pady=50, command=newPost)
-    viewPostButton = Button(dashboardFrame, text="Map",
-                            padx=100, pady=50, command=viewMap)
+    viewMapButton = Button(dashboardFrame, text="Map",
+                           padx=100, pady=50, command=viewMap)
     logoutButton = Button(dashboardFrame, text="Logout",
                           padx=100, pady=50, command=lambda: logout(dashboardFrame))
 
     addPostButton.grid(row=1, column=0, padx=20, pady=20)
-    viewPostButton.grid(row=1, column=1, padx=20, pady=20)
+    viewMapButton.grid(row=1, column=1, padx=20, pady=20)
     logoutButton.grid(row=2, column=0, columnspan=2, pady=20)
 
 
@@ -532,7 +539,21 @@ def findUser(em, pw, win):
 
 # Function to handle viewing maps
 def viewMap():
+    gis = GIS('home')
+    callback_map = gis.map('San Diego convention center, San Diego, CA', 16)
+    callback_map.on_click(find_addr)
+    callback_map
+
     return
+
+
+def find_addr(callback_map, g):
+    try:
+        callback_map.draw(g)
+        geocoded = geocoding.reverse_geocode(g)
+        print(geocoded['address']['Match_addr'])
+    except:
+        print("Couldn't match address. Try another place...")
 
 
 # Create new window
