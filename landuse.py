@@ -1,18 +1,25 @@
 import os
 import re
+import fiona
+from fiona.crs import from_epsg
 import psycopg2
 import datetime
+import numpy as np
+import pandas as pd
 from tkinter import *
+import matplotlib.pyplot as plt
+import geopandas as gpd
 from pathlib import Path
-from arcgis.gis import GIS
 from tkinter import ttk, Tk
 from dotenv import load_dotenv
 from tkinter import messagebox
 from tkinter import filedialog
-import arcgis.geocoding as geocoding
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from shapely.geometry import Point, Polygon
 
 # Load environment variables and set current user
-path = Path('.') / '.env'
+path = Path(".") / ".env"
 load_dotenv(path)
 current_user = None
 
@@ -27,36 +34,56 @@ current_user = None
 # Connect to elephantSQL database hosting
 try:
     conn = psycopg2.connect(
-        "postgres://rwnqktkh:rEINi490ai8VpCMpwbTXfE4EsSJn7VJ0@ziggy.db.elephantsql.com:5432/rwnqktkh")
+        "postgres://xmersysu:7t2_-ej6IafyXlvHGIuR8unVy1nG7Ovg@castor.db.elephantsql.com/xmersysu"
+    )
 except psycopg2.OperationalError as e:
+    print(e)
     messagebox.showerror(
-        "Network Error", "Please ensure you have an internet connection.")
+        "Network Error", "Please ensure you have an internet connection."
+    )
     os.abort()
 
 # Create cursor -- to execute commands on database
 cur = conn.cursor()
 
 # Create user table
-cur.execute("""
+cur.execute(
+    """
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         fName VARCHAR(15),
         lName VARCHAR(15),
         email VARCHAR(25) UNIQUE NOT NULL,
         password VARCHAR(100) NOT NULL
-    )""")
+    )"""
+)
+
+# cur.execute(
+#     """
+#     DROP TABLE parcels
+#     """
+# )
 
 # Create parcel table
-cur.execute("""
+cur.execute(
+    """
     CREATE TABLE IF NOT EXISTS parcels (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER,
+        owner VARCHAR(255),
         address VARCHAR(255),
-        size BIGINT,
+        xCoordinates text,
+        yCoordinates text,
         vacant BOOL,
+        land_use text,
+        plot_no INTEGER,
+        local_gov text,
+        block text,
+        C_of_O BOOL,
         date_acquired DATE,
+        user_id INTEGER,
         FOREIGN KEY (user_id) REFERENCES users (id)
-    )""")
+    )"""
+)
 
 # Save changes to database
 conn.commit()
@@ -77,7 +104,7 @@ radioVar.set("view")
 
 def updateTable(rows, table):
     for i in rows:
-        table.insert('', 'end', values=i)
+        table.insert("", "end", values=i)
 
 
 def setPostType(frame, frames, win):
@@ -103,11 +130,24 @@ def setPostType(frame, frames, win):
 
 def viewRecord(frame, win):
     viewHeader = Label(
-        frame, text="View your cadastral records", font=150, pady=60, bg="#fffe9f")
-    viewAllButton = Button(frame, text="View All", padx=100,
-                           pady=50, command=lambda: viewAll(win), bg="#fffafa")
-    viewOneButton = Button(frame, text="View One", padx=100,
-                           pady=50, command=lambda: viewOne(win), bg="#fffafa")
+        frame, text="View your cadastral records", font=150, pady=60, bg="#fffe9f"
+    )
+    viewAllButton = Button(
+        frame,
+        text="View All",
+        padx=100,
+        pady=50,
+        command=lambda: viewAll(win),
+        bg="#fffafa",
+    )
+    viewOneButton = Button(
+        frame,
+        text="View One",
+        padx=100,
+        pady=50,
+        command=lambda: viewOne(win),
+        bg="#fffafa",
+    )
     filler = Frame(frame, bg="#fffe9f", height=50)
 
     viewHeader.grid(row=0, column=1, columnspan=2)
@@ -123,11 +163,22 @@ def viewOne(win):
     queryFrame.pack(side=TOP, expand=True, fill="both")
 
     queryLabel = Label(
-        queryFrame, text="Query for a parcel of land using address.", pady=50, bg="#fffe9f", font=20)
+        queryFrame,
+        text="Query for a parcel of land using address.",
+        pady=50,
+        bg="#fffe9f",
+        font=20,
+    )
     queryEntry = Entry(queryFrame, width=70)
     filler = Frame(queryFrame, height=20)
-    querySubmit = Button(queryFrame, text="Submit", padx=30,
-                         pady=10, command=lambda: viewOneTable(queryEntry), bg="#fffafa")
+    querySubmit = Button(
+        queryFrame,
+        text="Submit",
+        padx=30,
+        pady=10,
+        command=lambda: viewOneTable(queryEntry),
+        bg="#fffafa",
+    )
 
     queryLabel.pack(side=TOP)
     queryEntry.pack(side=TOP)
@@ -140,14 +191,17 @@ def viewOne(win):
 def viewOneTable(queryEntry):
 
     # Query database for land information
-    cur.execute("SELECT * FROM parcels WHERE user_id=%s AND address=%s",
-                (current_user[0], queryEntry.get()))
+    cur.execute(
+        "SELECT * FROM parcels WHERE user_id=%s AND address=%s",
+        (current_user[0], queryEntry.get()),
+    )
     landInfo = cur.fetchall()
 
     # ============================================================
     if len(landInfo) < 1:
         messagebox.showerror(
-            "Query Error", f'No parcel of address {queryEntry.get()} was found.')
+            "Query Error", f"No parcel of address {queryEntry.get()} was found."
+        )
     else:
 
         # Open new window to display records in table
@@ -155,15 +209,18 @@ def viewOneTable(queryEntry):
         tableFrame = Frame(newWindow, bg="#fffe9f")
         tableFrame.pack(side=TOP, expand=True, fill="both")
 
-        headings = ["Land ID", "Owner", "Address",
-                    "Size", "Vacant", "Date Acquired"]
+        headings = ["Land ID", "Owner", "Address", "X-Coordinates", "Y-Coordinates", "Vacant", "Land Use", "Plot No", "Local Gov", "Block", "C of O", "Date Acquired"]
         # Display table showing relevant land records
-        table = ttk.Treeview(tableFrame, columns=(
-            1, 2, 3, 4, 5, 6), show="headings", height=len(landInfo))
+        table = ttk.Treeview(
+            tableFrame,
+            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+            show="headings",
+            height=len(landInfo),
+        )
         table.pack()
 
-        for i in range(7):
-            table.heading(i, text=headings[i-1])
+        for i in range(len(headings) + 1):
+            table.heading(i, text=headings[i - 1])
         updateTable(landInfo, table)
 
 
@@ -171,32 +228,48 @@ def viewAll(win):
 
     cur.execute("SELECT * FROM parcels WHERE user_id=%s", (current_user[0],))
     landInfo = cur.fetchall()
+    print(landInfo)
 
     if len(landInfo) < 1:
         messagebox.showerror(
-            "Query Error", f'No land information was found for user {current_user[2]}.')
+            "Query Error", f"No land information was found for user {current_user[2]}."
+        )
     else:
         # Open new window to input query parameters
-        newWindow = nuWindow(win, "Query dialog", "1240x720")
-        tableFrame = Frame(newWindow, bg="#fffe9f")
-        tableFrame.pack(side=TOP, expand=True, fill="both")
+        newWindow = nuWindow(win, "Query dialog", "1505x830")
+        newWindow.resizable(False, False)
+        tableFrame = Frame(newWindow, bg="#fff")
+        tableFrame.pack(expand=True, fill="both", padx=20, pady=10)
 
-        header = Label(
-            tableFrame, text=f'All Land records for {current_user[1]} {current_user[2]}.', pady=30, font=50, bg="#fffe9f")
-        header.pack()
-
-        filler = Frame(tableFrame, height=50)
-        filler.pack()
-
-        headings = ["Land ID", "Owner", "Address",
-                    "Size", "Vacant", "Date Acquired"]
+        # tableLength = 10 if len(landInfo) > 10 else len(landInfo)
+        headings = ["Land ID", "Owner", "Address", "X-Coordinates", "Y-Coordinates", "Vacant", "Land Use", "Plot No", "Local Gov", "Block", "C of O", "Date Acquired"]
         # Display table showing relevant land records
-        table = ttk.Treeview(tableFrame, columns=(
-            1, 2, 3, 4, 5, 6), show="headings", height=len(landInfo))
-        table.pack()
+        table = ttk.Treeview(
+            tableFrame,
+            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+            show="headings",
+            height=25,
+            # height=tableLength,
+        )
+        tableStyle = ttk.Style(table)
+        tableStyle.configure('Treeview', rowheight=30)
 
-        for i in range(7):
-            table.heading(i, text=headings[i-1])
+        table.pack(side="left")
+        table.place(x=0, y=0)
+
+        # Vertical ScrollBar
+        yScrollBar = ttk.Scrollbar(tableFrame, orient="vertical", command=table.yview)
+        yScrollBar.pack(side="right", fill="y")
+
+        # Horizontal ScrollBar
+        xScrollBar = ttk.Scrollbar(tableFrame, orient="horizontal", command=table.xview)
+        xScrollBar.pack(side="bottom", fill="x")
+
+        table.configure(yscrollcommand=yScrollBar.set, xscrollcommand=xScrollBar.set)
+
+        for i in range(len(headings) + 1):
+            table.heading(i, text=headings[i - 1])
+            table.column(i, width=120, minwidth=200)
         updateTable(landInfo, table)
 
     newWindow.protocol("WM_DELETE_WINDOW", lambda: on_closing(newWindow, win))
@@ -204,80 +277,150 @@ def viewAll(win):
 
 def postRecord(frame, win):
     postHeader = Label(
-        frame, text="Create a new cadastral record", font=150, pady=60, bg="#fffe9f")
+        frame, text="Create a new cadastral record", font=150, pady=60, bg="#fffe9f"
+    )
     postHeader.grid(row=0, column=1, columnspan=2)
 
     addressLabel = Label(frame, text="Address")
-    sizeLabel = Label(frame, text="Size")
+    xLabel = Label(frame, text="X-Coordinates")
+    yLabel = Label(frame, text="Y-Coordinates")
     vacantLabel = Label(frame, text="Vacant")
+    ownerLabel = Label(frame, text="Owner")
+    landUseLabel = Label(frame, text="LandUse")
+    plotNoLabel = Label(frame, text="PlotNo")
+    localGovLabel = Label(frame, text="LocalGov")
+    blockLabel = Label(frame, text="Block")
+    cofoLabel = Label(frame, text="C-of-O")
 
     filler1 = Frame(frame, height=20)
     filler2 = Frame(frame, height=20)
     filler3 = Frame(frame, height=20)
+    filler4 = Frame(frame, height=20)
+    filler5 = Frame(frame, height=20)
+    filler6 = Frame(frame, height=20)
+    filler7 = Frame(frame, height=20)
+    filler8 = Frame(frame, height=20)
+    filler9 = Frame(frame, height=20)
+    filler10 = Frame(frame, height=20)
 
     addressInput = Entry(frame, width=70)
-    sizeInput = Entry(frame, width=70)
+    xInput = Entry(frame, width=70)
+    yInput = Entry(frame, width=70)
     vacantInput = Entry(frame, width=70)
+    ownerInput = Entry(frame, width=70)
+    landUseInput = Entry(frame, width=70)
+    plotNoInput = Entry(frame, width=70)
+    localGovInput = Entry(frame, width=70)
+    blockInput = Entry(frame, width=70)
+    cofoInput = Entry(frame, width=70)
 
     addressLabel.grid(row=1, column=0)
     addressInput.grid(row=1, column=1)
     filler1.grid(row=2, column=0)
 
-    sizeLabel.grid(row=3, column=0)
-    sizeInput.grid(row=3, column=1)
+    xLabel.grid(row=3, column=0)
+    xInput.grid(row=3, column=1)
     filler2.grid(row=4, column=0)
 
-    vacantLabel.grid(row=5, column=0)
-    vacantInput.grid(row=5, column=1)
-
-    entries = [addressInput, sizeInput, vacantInput]
-
-    submitButton = Button(frame, text="Submit", padx=30,
-                          pady=10, command=lambda: uploadPost(entries))
+    yLabel.grid(row=5, column=0)
+    yInput.grid(row=5, column=1)
     filler3.grid(row=6, column=0)
-    submitButton.grid(row=7, column=1)
+
+    vacantLabel.grid(row=7, column=0)
+    vacantInput.grid(row=7, column=1)
+    filler4.grid(row=8, column=0)
+
+    ownerLabel.grid(row=9, column=0)
+    ownerInput.grid(row=9, column=1)
+    filler5.grid(row=10, column=0)
+
+    landUseLabel.grid(row=11, column=0)
+    landUseInput.grid(row=11, column=1)
+    filler6.grid(row=12, column=0)
+
+    plotNoLabel.grid(row=13, column=0)
+    plotNoInput.grid(row=13, column=1)
+    filler7.grid(row=14, column=0)
+
+    localGovLabel.grid(row=15, column=0)
+    localGovInput.grid(row=15, column=1)
+    filler8.grid(row=16, column=0)
+
+    blockLabel.grid(row=17, column=0)
+    blockInput.grid(row=17, column=1)
+    filler9.grid(row=18, column=0)
+
+    cofoLabel.grid(row=19, column=0)
+    cofoInput.grid(row=19, column=1)
+
+    entries = [addressInput, xInput, yInput, vacantInput, ownerInput, landUseInput, plotNoInput, localGovInput, blockInput, cofoInput]
+
+    submitButton = Button(
+        frame, text="Submit", padx=30, pady=10, command=lambda: uploadPost(entries)
+    )
+    filler10.grid(row=20, column=0)
+    submitButton.grid(row=21, column=1)
 
 
 def uploadPost(e):
 
     address = e[0].get()
-    size = e[1].get()
-    vacant = e[2].get()
+    coordinatesX = e[1].get()
+    coordinatesY = e[2].get()
+    vacant = e[3].get()
+    owner = e[4].get()
+    landUse = e[5].get()
+    plotNo = e[6].get()
+    localGov = e[7].get()
+    block = e[8].get()
+    cofo = e[9].get()
 
-    if (address == "" or size == "" or vacant == ""):
-        messagebox.showerror(
-            "Upload Error", "All fields must be properly filled")
-
+    if address == "" or coordinatesX == "" or coordinatesY =="" or vacant == "" or owner == "" or landUse == "" or plotNo == "" or localGov == "" or block == "" or cofo == "":
+        messagebox.showerror("Upload Error", "All fields must be properly filled")
     try:
-        cur.execute("""
-            INSERT INTO parcels (user_id, address, size, vacant, date_acquired) 
-            VALUES (%s, %s, %s, %s, %s)
-        """, (current_user[0], address, size, vacant, datetime.datetime.now()))
+        cur.execute(
+            """
+            INSERT INTO parcels (owner, user_id, address, xCoordinates, yCoordinates, vacant, land_use, plot_no, local_gov, block, C_of_O, date_acquired)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+            (owner, current_user[0], address, coordinatesX, coordinatesY, vacant, landUse, plotNo, localGov, block, cofo, datetime.datetime.now()),
+        )
 
         conn.commit()
 
         e[0].delete(0, END)
         e[1].delete(0, END)
         e[2].delete(0, END)
+        e[3].delete(0, END)
+        e[4].delete(0, END)
+        e[5].delete(0, END)
+        e[6].delete(0, END)
+        e[7].delete(0, END)
+        e[8].delete(0, END)
+        e[9].delete(0, END)
 
-        messagebox.showinfo("Upload Successful",
-                            "Your land information was uploaded successfully!")
+        messagebox.showinfo(
+            "Upload Successful", "Your land information was uploaded successfully!"
+        )
     except psycopg2.Error as e:
-        messagebox.showerror("Upload Error",
-                             "There was an error when uploading you information.")
+        messagebox.showerror(
+            "Upload Error", "There was an error when uploading you information."
+        )
         print(e)
 
 
 def updateRecord(frame, win):
     updateHeader = Label(
-        frame, text="Update an existing cadastral record", font=150, pady=60, bg="green")
+        frame, text="Update an existing cadastral record", font=150, pady=60, bg="green"
+    )
     updateHeader.grid(row=0, column=2)
     return
 
 
 def deleteRecord(frame, win):
     deleteHeader = Label(
-        frame, text="Delete an existing cadastral record", font=150, pady=60, bg="pink")
+        frame, text="Delete an existing cadastral record", font=150, pady=60, bg="pink"
+    )
     deleteHeader.grid(row=0, column=2)
     return
 
@@ -289,11 +432,18 @@ def welcomePage():
     welcomeFrame.pack()
 
     welcome_message = Label(
-        welcomeFrame, text="Landuse Database Application", font=50, pady=20, bg="#ffd480")
-    registerButton = Button(welcomeFrame, text="Register",
-                            padx=100, pady=50, command=register, bg="#fffe9f")
-    loginButton = Button(welcomeFrame, text="Login",
-                         padx=100, pady=50, command=login, bg="#fffe9f")
+        welcomeFrame,
+        text="Landuse Database Application",
+        font=50,
+        pady=20,
+        bg="#ffd480",
+    )
+    registerButton = Button(
+        welcomeFrame, text="Register", padx=100, pady=50, command=register, bg="#fffe9f"
+    )
+    loginButton = Button(
+        welcomeFrame, text="Login", padx=100, pady=50, command=login, bg="#fffe9f"
+    )
 
     welcome_message.pack()
     registerButton.pack(side=LEFT, padx=20, pady=20)
@@ -319,8 +469,7 @@ def register():
     lnLab = Label(regFrame, text="Last Name", pady=10, padx=10, bg="#fffafa")
     emLab = Label(regFrame, text="Email", pady=10, padx=10, bg="#fffafa")
     pwLab = Label(regFrame, text="Password", pady=10, padx=10, bg="#fffafa")
-    cpLab = Label(regFrame, text="Confirm Password",
-                  pady=10, padx=10, bg="#fffafa")
+    cpLab = Label(regFrame, text="Confirm Password", pady=10, padx=10, bg="#fffafa")
 
     fnLab.grid(row=0, column=0, sticky="we")
     lnLab.grid(row=1, column=0, sticky="n")
@@ -344,9 +493,13 @@ def register():
 
     # call addUser function on submit
     submit_btn = Button(
-        regFrame, text="Submit", command=lambda: addUser(fn_entry, ln_entry, em_entry, pw_entry, regWindow))
-    submit_btn.grid(row=5, column=0, columnspan=2,
-                    padx=20, pady=(50, 0), ipadx=200, sticky="n")
+        regFrame,
+        text="Submit",
+        command=lambda: addUser(fn_entry, ln_entry, em_entry, pw_entry, regWindow),
+    )
+    submit_btn.grid(
+        row=5, column=0, columnspan=2, padx=20, pady=(50, 0), ipadx=200, sticky="n"
+    )
     # ================================================================================
 
     regWindow.protocol("WM_DELETE_WINDOW", lambda: on_closing(regWindow, root))
@@ -379,12 +532,13 @@ def login():
     pw_logEntry.grid(row=1, column=1)
 
     submit_btn = Button(
-        loginFrame, text="Submit", command=lambda: findUser(em_logEntry, pw_logEntry, loginWindow))
-    submit_btn.grid(row=2, column=0, columnspan=2,
-                    padx=20, pady=(50, 0), ipadx=200)
+        loginFrame,
+        text="Submit",
+        command=lambda: findUser(em_logEntry, pw_logEntry, loginWindow),
+    )
+    submit_btn.grid(row=2, column=0, columnspan=2, padx=20, pady=(50, 0), ipadx=200)
 
-    loginWindow.protocol("WM_DELETE_WINDOW",
-                         lambda: on_closing(loginWindow, root))
+    loginWindow.protocol("WM_DELETE_WINDOW", lambda: on_closing(loginWindow, root))
 
 
 def dashboard():
@@ -395,15 +549,23 @@ def dashboard():
     dashboardFrame.pack()
 
     dashboardHeader = Label(
-        dashboardFrame, text=f"{current_user[2]}'s dashboard.", font=50, pady=20)
+        dashboardFrame, text=f"{current_user[2]}'s dashboard.", font=50, pady=20
+    )
     dashboardHeader.grid(row=0, column=0, columnspan=2)
 
-    addPostButton = Button(dashboardFrame, text="Database",
-                           padx=100, pady=50, command=newPost)
-    viewMapButton = Button(dashboardFrame, text="Map",
-                           padx=100, pady=50, command=viewMap)
-    logoutButton = Button(dashboardFrame, text="Logout",
-                          padx=100, pady=50, command=lambda: logout(dashboardFrame))
+    addPostButton = Button(
+        dashboardFrame, text="Database", padx=100, pady=50, command=newPost
+    )
+    viewMapButton = Button(
+        dashboardFrame, text="Map", padx=100, pady=50, command=viewMap
+    )
+    logoutButton = Button(
+        dashboardFrame,
+        text="Logout",
+        padx=100,
+        pady=50,
+        command=lambda: logout(dashboardFrame),
+    )
 
     addPostButton.grid(row=1, column=0, padx=20, pady=20)
     viewMapButton.grid(row=1, column=1, padx=20, pady=20)
@@ -441,19 +603,38 @@ def newPost():
     updateRecordFrame = Frame(postWindow, bg="#fffe9f")
     deleteRecordFrame = Frame(postWindow, bg="#fffe9f")
 
-    frames = [viewRecordFrame, postRecordFrame,
-              updateRecordFrame, deleteRecordFrame]
+    frames = [viewRecordFrame, postRecordFrame, updateRecordFrame, deleteRecordFrame]
 
     # Radio selections
     # =======================================================================
-    viewRadio = Radiobutton(selectionFrame, text="View record",
-                            variable=radioVar, value="view", command=lambda: setPostType(viewRecordFrame, frames, postWindow))
-    postRadio = Radiobutton(selectionFrame, text="Post record",
-                            variable=radioVar, value="create", command=lambda: setPostType(postRecordFrame, frames, postWindow))
-    updateRadio = Radiobutton(selectionFrame, text="Update record",
-                              variable=radioVar, value="update", command=lambda: setPostType(updateRecordFrame, frames, postWindow))
-    deleteRadio = Radiobutton(selectionFrame, text="Delete record",
-                              variable=radioVar, value="delete", command=lambda: setPostType(deleteRecordFrame, frames, postWindow))
+    viewRadio = Radiobutton(
+        selectionFrame,
+        text="View record",
+        variable=radioVar,
+        value="view",
+        command=lambda: setPostType(viewRecordFrame, frames, postWindow),
+    )
+    postRadio = Radiobutton(
+        selectionFrame,
+        text="Post record",
+        variable=radioVar,
+        value="create",
+        command=lambda: setPostType(postRecordFrame, frames, postWindow),
+    )
+    updateRadio = Radiobutton(
+        selectionFrame,
+        text="Update record",
+        variable=radioVar,
+        value="update",
+        command=lambda: setPostType(updateRecordFrame, frames, postWindow),
+    )
+    deleteRadio = Radiobutton(
+        selectionFrame,
+        text="Delete record",
+        variable=radioVar,
+        value="delete",
+        command=lambda: setPostType(deleteRecordFrame, frames, postWindow),
+    )
 
     viewRadio.grid(row=1, column=0, padx=20, sticky=W)
     postRadio.grid(row=2, column=0, padx=20, sticky=W)
@@ -462,8 +643,7 @@ def newPost():
 
     setPostType(viewRecordFrame, frames, postWindow)
 
-    postWindow.protocol("WM_DELETE_WINDOW",
-                        lambda: on_closing(postWindow, root))
+    postWindow.protocol("WM_DELETE_WINDOW", lambda: on_closing(postWindow, root))
 
 
 # Add user to database
@@ -474,18 +654,20 @@ def addUser(fn, ln, em, pw, win):
     # check empty input boxes
     if not (fn.get() == "" or ln.get() == "" or em.get() == "" or pw.get() == ""):
         try:
-            cur.execute("INSERT INTO users (fname, lname, email, password) VALUES(%s, %s, %s, %s)",
-                        (fn.get(), ln.get(), em.get(), pw.get()))
+            cur.execute(
+                "INSERT INTO users (fname, lname, email, password) VALUES(%s, %s, %s, %s)",
+                (fn.get(), ln.get(), em.get(), pw.get()),
+            )
         except psycopg2.errors.UniqueViolation:
             messagebox.showerror(
-                "Registration Error", f'User with email "{em.get()}" already exists.')
+                "Registration Error", f'User with email "{em.get()}" already exists.'
+            )
             # regWindow.focus_force()
             win.attributes("-topmost", True)
             em.delete(0, END)
         else:
             if not (re.search(regex, em.get())):
-                messagebox.showerror(
-                    "Email Error", "An invalid email was submitted.")
+                messagebox.showerror("Email Error", "An invalid email was submitted.")
                 win.attributes("-topmost", True)
                 em.delete(0, END)
             else:
@@ -496,13 +678,15 @@ def addUser(fn, ln, em, pw, win):
                 em.delete(0, END)
                 pw.delete(0, END)
 
-                messagebox.showinfo("Registration Successful",
-                                    "User has been created successfully!")
+                messagebox.showinfo(
+                    "Registration Successful", "User has been created successfully!"
+                )
                 exit_window(win)
                 toggle_hide_window(root)
     else:
         messagebox.showerror(
-            "Registration Error", f'All fields must be properly filled.')
+            "Registration Error", f"All fields must be properly filled."
+        )
         # regWindow.focus_force()
         win.attributes("-topmost", True)
 
@@ -513,8 +697,10 @@ def findUser(em, pw, win):
 
     if not (em.get() == "" or pw.get() == ""):
         try:
-            cur.execute("SELECT * FROM users WHERE email=%s AND password=%s",
-                        (em.get(), pw.get()))
+            cur.execute(
+                "SELECT * FROM users WHERE email=%s AND password=%s",
+                (em.get(), pw.get()),
+            )
             user = cur.fetchone()
             if user:
                 current_user = user
@@ -524,36 +710,69 @@ def findUser(em, pw, win):
 
             else:
                 messagebox.showinfo(
-                    "Error", "Invalid credentials. Try again or register an account.")
+                    "Error", "Invalid credentials. Try again or register an account."
+                )
                 # Set a topmost window
                 win.attributes("-topmost", True)
         except psycopg2.Error as e:
             messagebox.showinfo(
-                "Unknown error", "Please try again or register an account.")
+                "Unknown error", "Please try again or register an account."
+            )
     else:
-        messagebox.showinfo(
-            "Login Error", "All fields must be filled.")
+        messagebox.showinfo("Login Error", "All fields must be filled.")
 
         win.attributes("-topmost", True)
 
 
 # Function to handle viewing maps
 def viewMap():
-    gis = GIS('home')
-    callback_map = gis.map('San Diego convention center, San Diego, CA', 16)
-    callback_map.on_click(find_addr)
-    callback_map
+
+    mapWindow = Toplevel()
+    mapWindow.title("New Map")
+    mapWindow.geometry("1080x760")
+    mapWindow.columnconfigure(index=2, weight=10)
+
+    lf = ttk.Labelframe(mapWindow, text="Plot Area")
+    lf.pack()
+# =========================================================================================================================
+# ============================================================================================================================
+
+    # coordinates = [
+    #     (26.722117, 58.380184),
+    #     (26.724853, 58.380676),
+    #     (26.724961, 58.380518),
+    #     (26.722372, 58.379933),
+    # ]
+
+    # poly = Polygon(boros)
+
+    # print(newdata)
+
+    nybb_path = gpd.datasets.get_path('nybb')
+    boros = gpd.read_file(nybb_path)
+    boros.set_index('BoroCode', inplace=True)
+    boros.sort_index(inplace=True)
+    boros['geometry'].convex_hull
+    print(boros)
+
+    fig = Figure(figsize=(10, 7), dpi=100)
+    ax = fig.add_subplot(111)
+
+    # newdata.plot(ax=ax, column="gdp_per_cap")
+    boros.plot(ax=ax)
+    # poly.plot(ax=ax)
+
+    canvas = FigureCanvasTkAgg(fig, master=lf)
+    canvas.draw()
+    canvas.get_tk_widget().grid(row=0, column=0)
+
+    # Determine the output path for the Shapefile
+    # out_file = "./shapefiles/newshp.shp"
+
+    # Write the data into that Shapefile
+    # newdata.to_file(out_file)
 
     return
-
-
-def find_addr(callback_map, g):
-    try:
-        callback_map.draw(g)
-        geocoded = geocoding.reverse_geocode(g)
-        print(geocoded['address']['Match_addr'])
-    except:
-        print("Couldn't match address. Try another place...")
 
 
 # Create new window
@@ -609,7 +828,7 @@ def toggle_hide_window(win):
 
 # Function to show a frame
 def show_frame_grid(frame):
-    if (len(frame.grid_info()) == 0):
+    if len(frame.grid_info()) == 0:
         frame.grid(row=0, column=2, sticky="n")
     else:
         return
@@ -617,7 +836,7 @@ def show_frame_grid(frame):
 
 # Function to hide a frame
 def hide_frame_grid(frame):
-    if (len(frame.grid_info()) != 0):
+    if len(frame.grid_info()) != 0:
         frame.grid_remove()
     else:
         return
