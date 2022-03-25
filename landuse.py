@@ -1,22 +1,22 @@
 import os
 import re
-import fiona
-from fiona.crs import from_epsg
+# import fiona
+# from fiona.crs import from_epsg
 import psycopg2
 import datetime
-import numpy as np
-import pandas as pd
+# import numpy as np
+# import pandas as pd
 from tkinter import *
-import matplotlib.pyplot as plt
-import geopandas as gpd
+# import matplotlib.pyplot as plt
+# import geopandas as gpd
 from pathlib import Path
 from tkinter import ttk, Tk
 from dotenv import load_dotenv
 from tkinter import messagebox
 from tkinter import filedialog
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from shapely.geometry import Point, Polygon
+# from matplotlib.figure import Figure
+# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# from shapely.geometry import Point, Polygon
 
 # Load environment variables and set current user
 path = Path(".") / ".env"
@@ -71,13 +71,15 @@ cur.execute(
         id SERIAL PRIMARY KEY,
         owner VARCHAR(255),
         address VARCHAR(255),
+        plot_no INTEGER,
+        plan_no text,
+        volume_no INTEGER,
+        block text,
+        local_gov text,
         xCoordinates text,
         yCoordinates text,
-        vacant BOOL,
+        nature_of_Parcel text,
         land_use text,
-        plot_no INTEGER,
-        local_gov text,
-        block text,
         C_of_O BOOL,
         date_acquired DATE,
         user_id INTEGER,
@@ -209,11 +211,11 @@ def viewOneTable(queryEntry):
         tableFrame = Frame(newWindow, bg="#fffe9f")
         tableFrame.pack(side=TOP, expand=True, fill="both")
 
-        headings = ["Land ID", "Owner", "Address", "X-Coordinates", "Y-Coordinates", "Vacant", "Land Use", "Plot No", "Local Gov", "Block", "C of O", "Date Acquired"]
+        headings = ["Land ID", "Owner", "Address", "Plot No", "Plan No", "Volume No", "Block", "Local Gov", "X-Coordinates", "Y-Coordinates", "Nature of Parcel", "Land Use", "C of O", "Date Acquired"]
         # Display table showing relevant land records
         table = ttk.Treeview(
             tableFrame,
-            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
             show="headings",
             height=len(landInfo),
         )
@@ -222,7 +224,6 @@ def viewOneTable(queryEntry):
         for i in range(len(headings) + 1):
             table.heading(i, text=headings[i - 1])
         updateTable(landInfo, table)
-
 
 def viewAll(win):
 
@@ -236,17 +237,17 @@ def viewAll(win):
         )
     else:
         # Open new window to input query parameters
-        newWindow = nuWindow(win, "Query dialog", "1505x830")
+        newWindow = nuWindow(win, "Query dialog", "1750x830")
         newWindow.resizable(False, False)
         tableFrame = Frame(newWindow, bg="#fff")
         tableFrame.pack(expand=True, fill="both", padx=20, pady=10)
 
         # tableLength = 10 if len(landInfo) > 10 else len(landInfo)
-        headings = ["Land ID", "Owner", "Address", "X-Coordinates", "Y-Coordinates", "Vacant", "Land Use", "Plot No", "Local Gov", "Block", "C of O", "Date Acquired"]
+        headings = ["Land ID", "Owner", "Address", "Plot No", "Plan No", "Volume No", "Block", "Local Gov", "X-Coordinates", "Y-Coordinates", "Nature of Parcel", "Land Use", "C of O", "Date Acquired"]
         # Display table showing relevant land records
         table = ttk.Treeview(
             tableFrame,
-            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+            columns=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
             show="headings",
             height=25,
             # height=tableLength,
@@ -284,13 +285,15 @@ def postRecord(frame, win):
     addressLabel = Label(frame, text="Address")
     xLabel = Label(frame, text="X-Coordinates")
     yLabel = Label(frame, text="Y-Coordinates")
-    vacantLabel = Label(frame, text="Vacant")
+    natureOfParcelLabel = Label(frame, text="Nature-of-parcel")
     ownerLabel = Label(frame, text="Owner")
     landUseLabel = Label(frame, text="LandUse")
     plotNoLabel = Label(frame, text="PlotNo")
     localGovLabel = Label(frame, text="LocalGov")
     blockLabel = Label(frame, text="Block")
     cofoLabel = Label(frame, text="C-of-O")
+    planNoLabel = Label(frame, text="PlanNo")
+    volNoLabel = Label(frame, text="VolumeNo")
 
     filler1 = Frame(frame, height=20)
     filler2 = Frame(frame, height=20)
@@ -302,17 +305,22 @@ def postRecord(frame, win):
     filler8 = Frame(frame, height=20)
     filler9 = Frame(frame, height=20)
     filler10 = Frame(frame, height=20)
+    filler11 = Frame(frame, height=20)
+    filler12 = Frame(frame, height=20)
 
     addressInput = Entry(frame, width=70)
     xInput = Entry(frame, width=70)
     yInput = Entry(frame, width=70)
-    vacantInput = Entry(frame, width=70)
+    natureOfParcelInput = Entry(frame, width=70)
     ownerInput = Entry(frame, width=70)
     landUseInput = Entry(frame, width=70)
     plotNoInput = Entry(frame, width=70)
     localGovInput = Entry(frame, width=70)
     blockInput = Entry(frame, width=70)
     cofoInput = Entry(frame, width=70)
+    planNoInput = Entry(frame, width=70)
+    volNoInput = Entry(frame, width=70)
+
 
     addressLabel.grid(row=1, column=0)
     addressInput.grid(row=1, column=1)
@@ -326,8 +334,8 @@ def postRecord(frame, win):
     yInput.grid(row=5, column=1)
     filler3.grid(row=6, column=0)
 
-    vacantLabel.grid(row=7, column=0)
-    vacantInput.grid(row=7, column=1)
+    natureOfParcelLabel.grid(row=7, column=0)
+    natureOfParcelInput.grid(row=7, column=1)
     filler4.grid(row=8, column=0)
 
     ownerLabel.grid(row=9, column=0)
@@ -352,14 +360,22 @@ def postRecord(frame, win):
 
     cofoLabel.grid(row=19, column=0)
     cofoInput.grid(row=19, column=1)
+    filler10.grid(row=19, column=0)
 
-    entries = [addressInput, xInput, yInput, vacantInput, ownerInput, landUseInput, plotNoInput, localGovInput, blockInput, cofoInput]
+    planNoLabel.grid(row=20, column=0)
+    planNoInput.grid(row=20, column=1)
+    filler11.grid(row=21, column=0)
+
+    volNoLabel.grid(row=22, column=0)
+    volNoInput.grid(row=22, column=1)
+
+    entries = [addressInput, xInput, yInput, natureOfParcelInput, ownerInput, landUseInput, plotNoInput, localGovInput, blockInput, cofoInput, volNoInput, planNoInput]
 
     submitButton = Button(
         frame, text="Submit", padx=30, pady=10, command=lambda: uploadPost(entries)
     )
-    filler10.grid(row=20, column=0)
-    submitButton.grid(row=21, column=1)
+    filler12.grid(row=23, column=0)
+    submitButton.grid(row=24, column=1)
 
 
 def uploadPost(e):
@@ -367,23 +383,25 @@ def uploadPost(e):
     address = e[0].get()
     coordinatesX = e[1].get()
     coordinatesY = e[2].get()
-    vacant = e[3].get()
+    natureOfParcelInput = e[3].get()
     owner = e[4].get()
     landUse = e[5].get()
     plotNo = e[6].get()
     localGov = e[7].get()
     block = e[8].get()
     cofo = e[9].get()
+    volNo = e[10].get()
+    planNo = e[11].get()
 
-    if address == "" or coordinatesX == "" or coordinatesY =="" or vacant == "" or owner == "" or landUse == "" or plotNo == "" or localGov == "" or block == "" or cofo == "":
+    if address == "" or coordinatesX == "" or coordinatesY =="" or natureOfParcelInput == "" or owner == "" or landUse == "" or plotNo == "" or localGov == "" or block == "" or cofo == "":
         messagebox.showerror("Upload Error", "All fields must be properly filled")
     try:
         cur.execute(
             """
-            INSERT INTO parcels (owner, user_id, address, xCoordinates, yCoordinates, vacant, land_use, plot_no, local_gov, block, C_of_O, date_acquired)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO parcels (owner, user_id, address, xCoordinates, yCoordinates, plan_no, volume_no, nature_of_Parcel, land_use, plot_no, local_gov, block, C_of_O, date_acquired)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-            (owner, current_user[0], address, coordinatesX, coordinatesY, vacant, landUse, plotNo, localGov, block, cofo, datetime.datetime.now()),
+            (owner, current_user[0], address, coordinatesX, coordinatesY, planNo, volNo, natureOfParcelInput, landUse, plotNo, localGov, block, cofo, datetime.datetime.now()),
         )
 
         conn.commit()
@@ -398,6 +416,8 @@ def uploadPost(e):
         e[7].delete(0, END)
         e[8].delete(0, END)
         e[9].delete(0, END)
+        e[10].delete(0, END)
+        e[11].delete(0, END)
 
         messagebox.showinfo(
             "Upload Successful", "Your land information was uploaded successfully!"
@@ -727,13 +747,13 @@ def findUser(em, pw, win):
 # Function to handle viewing maps
 def viewMap():
 
-    mapWindow = Toplevel()
-    mapWindow.title("New Map")
-    mapWindow.geometry("1080x760")
-    mapWindow.columnconfigure(index=2, weight=10)
+    # mapWindow = Toplevel()
+    # mapWindow.title("New Map")
+    # mapWindow.geometry("1080x760")
+    # mapWindow.columnconfigure(index=2, weight=10)
 
-    lf = ttk.Labelframe(mapWindow, text="Plot Area")
-    lf.pack()
+    # lf = ttk.Labelframe(mapWindow, text="Plot Area")
+    # lf.pack()
 # =========================================================================================================================
 # ============================================================================================================================
 
@@ -748,23 +768,23 @@ def viewMap():
 
     # print(newdata)
 
-    nybb_path = gpd.datasets.get_path('nybb')
-    boros = gpd.read_file(nybb_path)
-    boros.set_index('BoroCode', inplace=True)
-    boros.sort_index(inplace=True)
-    boros['geometry'].convex_hull
-    print(boros)
+    # nybb_path = gpd.datasets.get_path('nybb')
+    # boros = gpd.read_file(nybb_path)
+    # boros.set_index('BoroCode', inplace=True)
+    # boros.sort_index(inplace=True)
+    # boros['geometry'].convex_hull
+    # print(boros)
 
-    fig = Figure(figsize=(10, 7), dpi=100)
-    ax = fig.add_subplot(111)
+    # fig = Figure(figsize=(10, 7), dpi=100)
+    # ax = fig.add_subplot(111)
 
     # newdata.plot(ax=ax, column="gdp_per_cap")
-    boros.plot(ax=ax)
+    # boros.plot(ax=ax)
     # poly.plot(ax=ax)
 
-    canvas = FigureCanvasTkAgg(fig, master=lf)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=0, column=0)
+    # canvas = FigureCanvasTkAgg(fig, master=lf)
+    # canvas.draw()
+    # canvas.get_tk_widget().grid(row=0, column=0)
 
     # Determine the output path for the Shapefile
     # out_file = "./shapefiles/newshp.shp"
